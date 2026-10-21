@@ -10,8 +10,8 @@ const STICKER_CONFIG = {
     maxVideoSizeBytes: 15 * 1024 * 1024, // Limite de segurança (~15MB em buffer)
 };
 
-// Comandos aceitos para ativação
-const VALID_COMMANDS = new Set(['!s', '!sticker']);
+// Comando aceito para ativação
+const VALID_COMMANDS = new Set(['!s']);
 
 // Inicialização do cliente WhatsApp
 const client = new Client({
@@ -95,34 +95,23 @@ client.on('message_create', async (msg) => {
         const body = (msg.body || '').trim().toLowerCase();
         const isCommand = VALID_COMMANDS.has(body);
 
-        // 3. Evita loop em mensagens de texto enviadas pelo próprio bot que não sejam comando nem mídia
-        if (!msg.hasMedia && !isCommand) {
+        // 3. Só processa se a mensagem tiver o comando !s (como legenda ou respondendo/marcando outra mensagem)
+        if (!isCommand) {
             return;
         }
 
-        // Identifica se é grupo diretamente pelo ID (@g.us), evitando chamadas extras ao Puppeteer (msg.getChat)
-        const isGroup = chatId.endsWith('@g.us');
-
         let targetMessage = null;
 
-        // 4. Regra de Gatilho de Ativação:
-        // Caso A: Alguém respondeu a uma mensagem com !s ou !sticker (funciona em grupos e no privado)
-        if (isCommand && msg.hasQuotedMsg) {
+        // 4. Regra de Gatilho de Ativação (apenas com !s):
+        // Caso A: A própria mídia foi enviada com a legenda !s
+        if (msg.hasMedia) {
+            targetMessage = msg;
+        }
+        // Caso B: Alguém marcou/respondeu a uma foto ou vídeo com !s
+        else if (msg.hasQuotedMsg) {
             const quotedMsg = await msg.getQuotedMessage();
             if (quotedMsg && quotedMsg.hasMedia && quotedMsg.type !== 'sticker') {
                 targetMessage = quotedMsg;
-            }
-        }
-        // Caso B: A própria mensagem possui mídia
-        else if (msg.hasMedia) {
-            if (isGroup) {
-                // Em grupos, só processa se a legenda for !s ou !sticker
-                if (isCommand) {
-                    targetMessage = msg;
-                }
-            } else {
-                // Em chats privados: processa automaticamente mídias suportadas
-                targetMessage = msg;
             }
         }
 

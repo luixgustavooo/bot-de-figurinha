@@ -32,13 +32,10 @@ Bot para WhatsApp desenvolvido em Node.js capaz de converter **imagens**, **víd
 
 ## 💬 Como Usar
 
-- **Em conversas privadas (PV)**:
-  - Basta enviar qualquer **imagem**, **GIF** ou **vídeo curto** (recomendado até 6 segundos) e o bot responderá automaticamente com a figurinha.
-  - Você também pode responder a uma mídia existente com `!s` ou `!sticker`.
+Tanto em **conversas privadas** quanto em **grupos**, o bot gera figurinhas apenas quando acionado com o comando `!s`:
 
-- **Em grupos**:
-  - Envie uma foto/vídeo com a legenda `!s` ou `!sticker`.
-  - Ou responda (marque) uma foto/vídeo já enviada no grupo digitando `!s` ou `!sticker`.
+1. **Enviando com legenda**: Envie uma **imagem**, **GIF** ou **vídeo curto** (até 6 segundos) com a legenda `!s`.
+2. **Marcando/respondendo uma mídia**: Responda (marque) uma foto, GIF ou vídeo já enviado na conversa digitando `!s`.
 
 ---
 
