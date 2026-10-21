@@ -1,0 +1,25 @@
+{
+  "name": "whatsapp-sticker-bot",
+  "version": "1.0.0",
+  "description": "Bot para WhatsApp gerador de figurinhas estáticas e animadas",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "postinstall": "node scripts/apply-patches.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "sticker",
+    "figurinha",
+    "whatsapp-web.js"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "qrcode-terminal": "^0.12.0",
+    "sharp": "^0.33.5",
+    "whatsapp-web.js": "^1.26.0"
+  }
+}
