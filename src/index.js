@@ -1,3 +1,4 @@
+require('../scripts/apply-patches');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const sharp = require('sharp');
@@ -23,12 +24,14 @@ const client = new Client({
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
             '--disable-gpu'
         ]
     }
+});
+
+// Progresso de carregamento
+client.on('loading_screen', (percent, message) => {
+    console.log(`⏳ Carregando WhatsApp Web: ${percent}% (${message})`);
 });
 
 // Exibe o QR Code no terminal para autenticação
@@ -37,6 +40,11 @@ client.on('qr', (qr) => {
     console.log('Escaneie o QR Code abaixo no seu WhatsApp:');
     console.log('=========================================\n');
     qrcode.generate(qr, { small: true });
+});
+
+// Confirmação de autenticação
+client.on('authenticated', () => {
+    console.log('🔐 Autenticado com sucesso! Sincronizando sessão...');
 });
 
 // Confirmação de conexão pronta
@@ -92,8 +100,8 @@ client.on('message_create', async (msg) => {
             return;
         }
 
-        const body = (msg.body || '').trim().toLowerCase();
-        const isCommand = VALID_COMMANDS.has(body);
+        const rawText = (msg.body || msg._data?.caption || '').trim().toLowerCase();
+        const isCommand = VALID_COMMANDS.has(rawText) || rawText.startsWith('!s ');
 
         // 3. Só processa se a mensagem tiver o comando !s (como legenda ou respondendo/marcando outra mensagem)
         if (!isCommand) {
@@ -152,6 +160,7 @@ client.on('message_create', async (msg) => {
                 stickerName: STICKER_CONFIG.name,
                 stickerAuthor: STICKER_CONFIG.author,
                 quotedMessageId,
+                ignoreQuoteErrors: true,
                 sendSeen: false
             });
 
@@ -166,7 +175,7 @@ client.on('message_create', async (msg) => {
                 await client.sendMessage(
                     chatId,
                     '⚠️ Esse vídeo é muito longo ou pesado! Por favor, envie um vídeo de até 6 segundos.',
-                    { quotedMessageId, sendSeen: false }
+                    { quotedMessageId, ignoreQuoteErrors: true, sendSeen: false }
                 );
                 return;
             }
@@ -177,6 +186,7 @@ client.on('message_create', async (msg) => {
                     stickerName: STICKER_CONFIG.name,
                     stickerAuthor: STICKER_CONFIG.author,
                     quotedMessageId,
+                    ignoreQuoteErrors: true,
                     sendSeen: false
                 });
 
@@ -186,7 +196,7 @@ client.on('message_create', async (msg) => {
                 await client.sendMessage(
                     chatId,
                     '❌ Não foi possível converter este vídeo em figurinha. Por favor, envie um vídeo mais curto (de até 6 segundos).',
-                    { quotedMessageId, sendSeen: false }
+                    { quotedMessageId, ignoreQuoteErrors: true, sendSeen: false }
                 );
             }
         }
@@ -196,4 +206,5 @@ client.on('message_create', async (msg) => {
 });
 
 // Inicializa o cliente
+console.log('🚀 Iniciando o Bot de Figurinhas... Aguarde a conexão com o WhatsApp Web.');
 client.initialize();

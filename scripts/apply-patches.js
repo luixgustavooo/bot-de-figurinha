@@ -3,6 +3,10 @@ const path = require('path');
 
 const filesToPatch = [
     {
+        src: path.join(__dirname, '..', 'patches', 'whatsapp-web.js', 'Client.js'),
+        dest: path.join(__dirname, '..', 'node_modules', 'whatsapp-web.js', 'src', 'Client.js'),
+    },
+    {
         src: path.join(__dirname, '..', 'patches', 'whatsapp-web.js', 'Utils.js'),
         dest: path.join(__dirname, '..', 'node_modules', 'whatsapp-web.js', 'src', 'util', 'Injected', 'Utils.js'),
     },

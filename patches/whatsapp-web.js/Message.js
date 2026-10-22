@@ -47,19 +47,37 @@ class Message extends Base {
          */
         this.ack = data.ack;
 
+        const isMediaType =
+            data.type === 'image' ||
+            data.type === 'video' ||
+            data.type === 'gif' ||
+            data.type === 'audio' ||
+            data.type === 'ptt' ||
+            data.type === 'document' ||
+            data.type === 'sticker';
+
         /**
          * Indicates if the message has media available for download
          * @type {boolean}
          */
-        this.hasMedia = Boolean(data.directPath);
+        this.hasMedia = Boolean(
+            data.directPath ||
+                data.mediaKey ||
+                (isMediaType &&
+                    (data.clientUrl ||
+                        data.deprecatedMms3Url ||
+                        data.size ||
+                        data.mimetype)),
+        );
 
         /**
          * Message content
          * @type {string}
          */
-        this.body = this.hasMedia
-            ? data.caption || ''
-            : data.body || data.pollName || data.eventName || '';
+        this.body =
+            this.hasMedia || isMediaType
+                ? data.caption || ''
+                : data.body || data.pollName || data.eventName || '';
 
         /**
          * Message type
@@ -442,7 +460,16 @@ class Message extends Base {
             const quotedMsg = window
                 .require('WAWebQuotedMsgModelUtils')
                 .getQuotedMsgObj(msg);
-            return quotedMsg ? window.WWebJS.getMessageModel(quotedMsg) : null;
+            if (!quotedMsg) return null;
+            if (!window.WWebJS._quotedMsgCache) {
+                window.WWebJS._quotedMsgCache = new Map();
+            }
+            const qKey = window.WWebJS.getMsgKeyId(quotedMsg.id);
+            if (qKey) window.WWebJS._quotedMsgCache.set(qKey, quotedMsg);
+            if (quotedMsg.id?.id) {
+                window.WWebJS._quotedMsgCache.set(quotedMsg.id.id, quotedMsg);
+            }
+            return window.WWebJS.getMessageModel(quotedMsg);
         }, this.id);
 
         return quotedMsg ? new Message(this.client, quotedMsg) : undefined;
@@ -521,80 +548,148 @@ class Message extends Base {
             return undefined;
         }
 
-        const result = await this.client.pupPage.evaluate(async (id) => {
-            const msg = await window.WWebJS.getMessageById(id);
+        const fallbackMedia = {
+            directPath: this._data?.directPath,
+            encFilehash: this._data?.encFilehash,
+            filehash: this._data?.filehash,
+            mediaKey: this._data?.mediaKey,
+            mediaKeyTimestamp: this._data?.mediaKeyTimestamp,
+            type: this._data?.type,
+            mimetype: this._data?.mimetype,
+            filename: this._data?.filename,
+            size: this._data?.size,
+        };
 
-            // REUPLOADING mediaStage means the media is expired and the download button is spinning, cannot be downloaded now
-            if (
-                !msg ||
-                !msg.mediaData ||
-                msg.mediaData.mediaStage === 'REUPLOADING'
-            ) {
-                return null;
-            }
-            if (msg.mediaData.mediaStage != 'RESOLVED') {
-                try {
-                    // try to resolve media
-                    await msg.downloadMedia({
-                        downloadEvenIfExpensive: true,
-                        rmrReason: 1,
-                    });
-                } catch {
-                    // continue and try decrypting directly if directPath is present
+        const result = await this.client.pupPage.evaluate(
+            async (id, fallback) => {
+                let msg = await window.WWebJS.getMessageById(id);
+                if (!msg && window.WWebJS._quotedMsgCache) {
+                    const key = window.WWebJS.getMsgKeyId(id);
+                    msg =
+                        (key && window.WWebJS._quotedMsgCache.get(key)) ||
+                        (id?.id && window.WWebJS._quotedMsgCache.get(id.id)) ||
+                        null;
                 }
-            }
 
-            if (
-                msg.mediaData.mediaStage.includes('ERROR') ||
-                msg.mediaData.mediaStage === 'FETCHING'
-            ) {
-                // media could not be downloaded
-                return undefined;
-            }
+                // Wait up to 8s if an outgoing/syncing message is still uploading or populating directPath
+                if (msg && !msg.directPath && !msg.mediaData?.mediaBlob) {
+                    for (let i = 0; i < 40; i++) {
+                        await new Promise((r) => setTimeout(r, 200));
+                        if (msg.directPath || msg.mediaData?.mediaBlob) break;
+                    }
+                }
 
-            try {
-                const mockQpl = {
-                    addAnnotations: function () {
-                        return this;
-                    },
-                    addPoint: function () {
-                        return this;
-                    },
+                const tryReadMediaBlob = async (m) => {
+                    try {
+                        const rawBlob = m?.mediaData?.mediaBlob;
+                        if (!rawBlob) return null;
+                        const blob =
+                            rawBlob instanceof Blob
+                                ? rawBlob
+                                : typeof rawBlob.forceToBlob === 'function'
+                                  ? rawBlob.forceToBlob()
+                                  : null;
+                        if (!blob) return null;
+                        const buf = await blob.arrayBuffer();
+                        if (!buf || buf.byteLength === 0) return null;
+                        const data =
+                            await window.WWebJS.arrayBufferToBase64Async(buf);
+                        return {
+                            data,
+                            mimetype:
+                                m.mimetype ||
+                                fallback?.mimetype ||
+                                blob.type ||
+                                'application/octet-stream',
+                            filename: m.filename || fallback?.filename,
+                            filesize:
+                                m.size || fallback?.size || buf.byteLength,
+                        };
+                    } catch {
+                        return null;
+                    }
                 };
-                const decryptedMedia = await window
-                    .require('WAWebDownloadManager')
-                    .downloadManager.downloadAndMaybeDecrypt({
-                        directPath: msg.directPath,
-                        encFilehash: msg.encFilehash,
-                        filehash: msg.filehash,
-                        mediaKey: msg.mediaKey,
-                        mediaKeyTimestamp: msg.mediaKeyTimestamp,
-                        type: msg.type,
-                        mimetype: msg.mimetype,
-                        signal: new AbortController().signal,
-                        downloadQpl: mockQpl,
-                    });
 
-                const data =
-                    await window.WWebJS.arrayBufferToBase64Async(
-                        decryptedMedia,
-                    );
+                const tryDecryptFromCdn = async (source) => {
+                    const directPath =
+                        source?.directPath || fallback?.directPath;
+                    const mediaKey = source?.mediaKey || fallback?.mediaKey;
+                    if (!directPath || !mediaKey) return null;
 
-                return {
-                    data,
-                    mimetype: msg.mimetype,
-                    filename: msg.filename,
-                    filesize: msg.size,
+                    const mockQpl = {
+                        addAnnotations: function () {
+                            return this;
+                        },
+                        addPoint: function () {
+                            return this;
+                        },
+                    };
+                    const decryptedMedia = await window
+                        .require('WAWebDownloadManager')
+                        .downloadManager.downloadAndMaybeDecrypt({
+                            directPath,
+                            encFilehash:
+                                source?.encFilehash || fallback?.encFilehash,
+                            filehash: source?.filehash || fallback?.filehash,
+                            mediaKey,
+                            mediaKeyTimestamp:
+                                source?.mediaKeyTimestamp ||
+                                fallback?.mediaKeyTimestamp,
+                            type: source?.type || fallback?.type,
+                            mimetype: source?.mimetype || fallback?.mimetype,
+                            signal: new AbortController().signal,
+                            downloadQpl: mockQpl,
+                        });
+                    const data =
+                        await window.WWebJS.arrayBufferToBase64Async(
+                            decryptedMedia,
+                        );
+                    return {
+                        data,
+                        mimetype: source?.mimetype || fallback?.mimetype,
+                        filename: source?.filename || fallback?.filename,
+                        filesize: source?.size || fallback?.size,
+                    };
                 };
-            } catch (e) {
-                if (e && e.status === 404) return undefined;
-                return {
-                    __error:
-                        (e && (e.message || e.name || String(e))) ||
-                        'Unknown media decrypt error',
-                };
-            }
-        }, this.id);
+
+                // 1. Check in-memory mediaBlob first
+                const fromBlob = await tryReadMediaBlob(msg);
+                if (fromBlob) return fromBlob;
+
+                // 2. Try direct CDN download & decrypt first
+                try {
+                    const fromCdn = await tryDecryptFromCdn(msg);
+                    if (fromCdn) return fromCdn;
+                } catch {}
+
+                // 3. Fallback: trigger msg.downloadMedia (RMR / resolve) and retry
+                if (msg && typeof msg.downloadMedia === 'function') {
+                    try {
+                        await msg.downloadMedia({
+                            downloadEvenIfExpensive: true,
+                            rmrReason: 1,
+                            isUserInitiated: true,
+                        });
+                    } catch {}
+
+                    const fromBlobAfter = await tryReadMediaBlob(msg);
+                    if (fromBlobAfter) return fromBlobAfter;
+                }
+
+                try {
+                    return await tryDecryptFromCdn(msg);
+                } catch (e) {
+                    if (e && e.status === 404) return undefined;
+                    return {
+                        __error:
+                            (e && (e.message || e.name || String(e))) ||
+                            'Unknown media decrypt error',
+                    };
+                }
+            },
+            this.id,
+            fallbackMedia,
+        );
 
         if (!result) return undefined;
         if (result.__error) {

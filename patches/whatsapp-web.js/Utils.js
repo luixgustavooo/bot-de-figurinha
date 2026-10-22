@@ -265,8 +265,15 @@ exports.LoadUtils = () => {
         let msg = null;
         for (const key of candidateKeys) {
             if (!key) continue;
-            msg = attempt(() => Msg.get(key));
+            msg =
+                attempt(() => Msg.get(key)) ||
+                (window.WWebJS._quotedMsgCache &&
+                    window.WWebJS._quotedMsgCache.get(key)) ||
+                null;
             if (msg) return msg;
+        }
+        if (rawId && window.WWebJS._quotedMsgCache?.has(rawId)) {
+            return window.WWebJS._quotedMsgCache.get(rawId);
         }
 
         if (remote && rawId) {
@@ -381,13 +388,23 @@ exports.LoadUtils = () => {
                 options.quotedMessageId,
             );
             if (quotedMessage) {
-                const ReplyUtils = window.require('WAWebMsgReply');
-                const canReply = ReplyUtils
-                    ? ReplyUtils.canReplyMsg(quotedMessage.unsafe())
-                    : quotedMessage.canReply();
+                try {
+                    const ReplyUtils = window.require('WAWebMsgReply');
+                    const canReply = ReplyUtils
+                        ? ReplyUtils.canReplyMsg(quotedMessage.unsafe())
+                        : quotedMessage.canReply();
 
-                if (canReply) {
-                    quotedMsgOptions = quotedMessage.msgContextInfo(chat);
+                    if (canReply) {
+                        quotedMsgOptions = quotedMessage.msgContextInfo(
+                            chat.id || chat,
+                        );
+                    }
+                } catch {
+                    try {
+                        quotedMsgOptions = quotedMessage.msgContextInfo(
+                            chat.id || chat,
+                        );
+                    } catch {}
                 }
             } else {
                 if (!options.ignoreQuoteErrors) {
@@ -1041,6 +1058,49 @@ exports.LoadUtils = () => {
                 });
             }
         }
+
+        const restoreSerialized = (val, depth = 0) => {
+            if (!val || typeof val !== 'object' || depth > 5) return val;
+            if (Array.isArray(val)) {
+                for (let i = 0; i < val.length; i++) {
+                    restoreSerialized(val[i], depth + 1);
+                }
+                return val;
+            }
+            if (val._serialized == null) {
+                if (typeof val.$1 === 'string' && val.$1.length > 0) {
+                    val._serialized = val.$1;
+                } else if (
+                    typeof val.fromMe === 'boolean' &&
+                    val.remote &&
+                    typeof val.id === 'string'
+                ) {
+                    const rem =
+                        typeof val.remote === 'object'
+                            ? val.remote._serialized || val.remote.$1
+                            : val.remote;
+                    if (rem) {
+                        val._serialized = val.participant
+                            ? `${val.fromMe}_${rem}_${val.id}_${typeof val.participant === 'object' ? val.participant._serialized || val.participant.$1 : val.participant}`
+                            : `${val.fromMe}_${rem}_${val.id}`;
+                    }
+                } else if (
+                    typeof val.user === 'string' &&
+                    typeof val.server === 'string'
+                ) {
+                    val._serialized = `${val.user}@${val.server}`;
+                }
+            }
+            for (const k of Object.keys(val)) {
+                const child = val[k];
+                if (child && typeof child === 'object') {
+                    restoreSerialized(child, depth + 1);
+                }
+            }
+            return val;
+        };
+
+        restoreSerialized(msg);
 
         delete msg.pendingAckUpdate;
 
