@@ -19,9 +19,19 @@ Bot para WhatsApp desenvolvido em Node.js capaz de converter **imagens**, **víd
    ```
 
 2. **Inicie o bot**:
-   ```bash
-   npm start
-   ```
+   - **Modo Aplicativo Desktop (Janela Gráfica)**:
+     Dê duplo clique em **`BotFigurinha.exe`** ou execute:
+     ```bash
+     npm run gui
+     ```
+   - **Modo Terminal**:
+     ```bash
+     npm start
+     ```
+   - Para recompilar o executável `BotFigurinha.exe`:
+     ```bash
+     npm run build:exe
+     ```
 
 3. **Autentique no WhatsApp**:
    - No terminal, será exibido um **QR Code**.

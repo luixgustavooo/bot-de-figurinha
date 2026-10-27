@@ -5,6 +5,8 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "gui": "node src/index.js --gui",
+    "build:exe": "node scripts/build-exe.js",
     "postinstall": "node scripts/apply-patches.js"
   },
   "keywords": [
